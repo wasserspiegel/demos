@@ -2,10 +2,12 @@
 
 This project demonstrates Klondike/Solitaire in [Hoplon][2].
 
+[See this demo.][4]
+
 
 ## Dependencies
 
-- java 1.7+
+- java 1.8
 - [boot][1]
 
 ## Usage
@@ -16,9 +18,9 @@ This project demonstrates Klondike/Solitaire in [Hoplon][2].
     $ boot dev
     ```
 
-2. Go to [http://localhost:8000][3] in your browser.
+2. Go to [http://localhost:3000][3] in your browser.
 
 [1]: https://boot-clj.com
 [2]: https://hoplon.io
 [3]: http://localhost:3000
-
+[4]: https://wasserspiegel.github.io/hoplon-demos/klondike/
