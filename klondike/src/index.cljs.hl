@@ -1,0 +1,367 @@
+; Klondike example game
+; a 2017 new years project, bear in mind it is my first hoplon project
+; rules and names from https://en.wikipedia.org/wiki/Klondike_(solitaire)
+; by wasserspiegel
+; License EPL ... same as other hoplon demos
+(page "index.html"
+      (:require
+        [hoplon.storage-atom :refer [local-storage]]
+        ))
+
+(def css-reset
+  "@charset \" UTF-8 \";
+  html, body, div, span, applet, object, iframe, h1, h2, h3, h4, h5, h6,
+  p, blockquote, pre, a, abbr, acronym, address, big, cite, code, del,
+  dfn, em, img, ins, kbd, q, s, samp, small, strike, strong, sub, sup,
+  tt, var, b, u, i, center, dl, dt, dd, ol, ul, li, fieldset, form, label,
+  button, legend, table, caption, tbody, tfoot, thead, tr, th, td, article,
+  aside, canvas, details, embed, figure, figcaption, footer, header, hgroup,
+  menu, nav, output, ruby, section, summary, time, mark, audio, video {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font-size: 100%;
+    font: inherit;
+    vertical-align: baseline;
+    background-color: transparent;
+  }
+
+  ol, ul { list-style: none; }
+
+  blockquote, q { quotes: none; }
+
+  blockquote:before, blockquote:after,
+  q:before, q:after { content: ''; content: none; }
+
+  table { border-collapse: collapse; border-spacing: 0; }
+
+  * { box-sizing: border-box; }
+
+  input[type=\" text \"], input[type=\" email \"],
+  input[type=\" password \"], input[type=\" phone \"],
+  input[type=\" url \"], input[type=\" search \"],
+  input[type=\" submit \"], input[type=\" button \"],
+  select, textarea {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    border: none;
+    background-color: transparent;
+  }
+")
+
+(def css-solitare
+  "#table {
+          position: static;
+          width:420px;
+          height:360px;
+          background-color: #263;
+          border-color: #a44;
+          border: 6px;
+          }
+
+  .hidden{ display:none;      }
+
+  .card {
+         background-color: #fff;
+         border-color: #888;
+         border: 1px;
+         border-style: solid;
+         border-radius: 8px;
+         vertical-align: middle;
+         transition: 0.5s linear;
+         }
+
+  .flip { transform:  scale(0.5);
+          transform:  rotateY(180deg);
+          transition: all 0.8s;
+   }
+
+  .caption1 {display:block; position: absolute; top:    0px; left:  0px;}
+  .caption2 {display:block; position: absolute; bottom: 0px; right: 0px;}
+  .red>div   {color: #f00;}
+  .black>div {color: #000;}
+  .pile {
+         background-color: #374;
+         border:2px;
+         border-color: #6b6;
+         border-radius: 8px;
+         border-style: solid;
+         }
+
+   .selected {filter: drop-shadow(0px 0px 12px yellow)}
+
+   .flip {background-color:#44f;}
+   .flip>.caption1 {display:none; }
+   .flip>.caption2 {display:none; }
+  ")
+
+
+;; some game facts
+
+(def suits ["♥" "♣" "♦" "♠"])
+(def values ["A" "2" "3" "4" "5" "6" "7" "8" "9" "10" "B" "D" "K"])
+(def new_deck (for [x suits y values] (str x y)))
+(def fs (count suits))
+(def ts 7)
+
+(def init_gst (into ^{:count -1} {"o" (vec (repeat (count new_deck) true)) ;turn Over card
+                                  "s" (vec (range (count new_deck))) ;stack to draw from
+                                  "w" []}
+                    (concat (for [x (range fs)] [(str "f" x) []])
+                            (for [x (range ts)] [(str "t" x) []]))
+                    ))
+
+(def gridm (into {} (concat
+                      (map-indexed #(vector %2 [%1 0 -1]) ["s" "w"])
+                      (map-indexed #(vector %2 [(+ %1 3) 0 -1]) ["f0" "f1" "f2" "f3"])
+                      (map-indexed #(vector %2 [%1 1 -1]) ["t0" "t1" "t2" "t3" "t4" "t5" "t6"]))))
+
+;; persisted state ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def game (-> (cell {:deck (shuffle new_deck) :moves [] :count 0}) (local-storage ::game)))
+
+(defn add-move! [m]
+      (let [mx (vec (concat m [(get-in @game [:count])]))]
+           (swap! game update-in [:moves] conj mx)
+           (swap! game update-in [:count] inc)
+           ))
+
+(defn mu! [m]
+      (add-move! m))
+
+(defn new! [] (reset! game {:deck  (shuffle new_deck)
+                            :moves [[(vec (range 52)) :init "s" 0]]
+                            :count 0}))                     ;move-count to allow undo/replay
+
+(defn deal [] (concat (map-indexed (fn [i e] (into [[i]] e)) ;prepend index (deal first n cards)
+                                   (apply concat (for [t (range ts)]
+                                                      (conj (vec (for [c (range (+ t 1))]
+                                                                      ["s" (str "t" t)]))
+                                                            ))))
+                      (map (fn [a b] [[(+ a b)] (str "t" a) "o"]) (range 7) (reductions + (range 7))))) ;flip top tableau cards
+
+(defn deal! "execute seq of moves setting up the board" []
+      (doseq [m (deal)]
+             (add-move! m) ))
+
+(defn clear-clicks! []
+      (reset! selected nil)
+      (reset! target nil))
+
+(new!)
+(deal!)
+;; utility fn
+
+(defn alt-col? [xs] (reduce (fn [a b] (not= a b)) (mapv card-col xs)))
+(defn same-suit? [xs] (reduce (fn [a b] (= a b)) (mapv first xs)))
+
+(defn card-vals [xs] (mapv (fn [x] (.indexOf values (clojure.string/join (rest x)))) xs))
+
+(defn dsc-val? [xs] (not-any? false? (map (fn [[a b]] (> a b)) (partition 2 1 (card-vals xs)))))
+(defn asc-val? [xs] (not-any? false? (map (fn [[a b]] (< a b)) (partition 2 1 (card-vals xs)))))
+(defn king? [x] (= (last values) (str (last x))))
+(defn ace? [x] (= (first values) (str (last x))))
+
+(defn face-up? [c] (not (get @visibility c)))
+
+; local state cells ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defc selected nil)
+(defc target nil)
+(defc size 2)
+
+;; clicks & moving cards
+
+(defn clicked! [type id]
+      (cond
+        (and (= :card type) (nil? @selected))
+        (let [[p cs] (card-pile id @g2)
+              ix (.indexOf cs id)]
+             (reset! selected [p (subvec cs ix)]))          ; pile [id, subcards..]
+
+        (and (= :card type) (not (nil? @selected)) (nil? @target))
+        (let [[p cs] (card-pile id @g2)
+              ix (.indexOf cs id)]
+             (reset! target [p (subvec cs ix)]))
+
+        (and (= :pile type) (= id "s"))
+        (do (reset! selected [id nil])
+            (reset! target [id nil]))
+
+        (and (= :pile type) (not (nil? @selected)) (nil? @target))
+        (reset! target [id nil])
+
+        :else (.log js/console (str "click event without a cond clause (args): " type id))
+        )
+      (when (not (nil? @target)) (check_move!))
+      )
+
+(defn check-move! []
+
+      (let [[sp scs] @selected
+            [st tcs] @target
+            ncs (concat tcs scs)
+            rcs (mapv #(get-in @game [:deck %]) ncs)]
+
+           (cond
+             ;draw/shuffle
+             (and (re-seq #"s[sw]" (str st sp)))
+             (let [stack (get @g2 "s")
+                   recycle (get @g2 "w")]
+                  (if (not (empty? scs))
+                    ;draw
+                    (do (mu! [[(first scs)] "s" "w"]) (mu! [[(first scs)] "w" "o"]))
+                    ;shuffle
+                    (do
+                      (mu! [recycle "w" "o"])
+                      (mu! [recycle "w" :shuffle])
+                      (mu! [(shuffle recycle) :shuffle "s"])
+                      )))
+
+             ;flip top tableau ----------------- same card - face down?------------------ top of the stack -----
+             (and (re-seq #"t\dt\d" (str st sp)) (= st sp) (not (face-up? (first scs))) (= (last (get @g2 st)) (first scs)))
+             (mu! [scs st "o"])
+
+             ;place on tableau ----- not empty --- alternating -- descending ------- face-up
+             (and (re-seq #"t\d" st) (not (empty? tcs)) (alt-col? ncs) (dsc-val? rcs) (face-up? (first scs)))
+             (mu! [scs sp st])
+
+             ;place on tableau ----- empty or face-down ---------------------- alternating -- starting with a king ------- face-up
+             (and (re-seq #"t\d" st) (or (nil? tcs) (not face-up? (last tcs))) (alt-col? scs) (king? (card-cap (first scs))) (face-up? (first scs)))
+             (mu! [scs sp st])
+
+             ;place on foundation -- not empty --- same suit------- descendending------- face-up
+             (and (re-seq #"f\d" st) (not (empty? tcs)) (same-suit? rcs) (asc-val? rcs) (face-up? (first scs)))
+             (mu! [scs sp st])
+
+             ;place on foundation --  empty --- Ace--------------- single card ------- face-up
+             (and (re-seq #"f\d" st) (empty? tcs) (ace? (first rcs)) (= 1 (count scs)) (face-up? (first scs)))
+             (mu! [scs sp st])
+
+             :else (do
+                     (.log js/console "unsupported move: " (str @selected @target))
+                     (.log js/console "check your sequence" rcs))
+             )
+           (clear-clicks!)
+           ))
+
+;; card --- queries ;;;;
+
+(defn ijk->xyz
+      "calc position i .. col, j .. row, k .. card (-1 is the pilebase}"
+      [[i j k]]
+      (let [k1 (if (= -1 k) 0 k)
+            x (+ (* 30 i) (* 20 i @size))
+            y (+ (* 50 j) (* 30 j @size) (* 15 j k1))
+            z (+ 10 k)]
+           [x y z]))
+(defn wh [] [(+ 20 (* @size 20)) (+ 30 (* @size 30))])
+(defn xyz-wh->css [[x y z] [w h]]
+      {:position "absolute"
+       :left     (str x "px")
+       :top      (str y "px")
+       :width    (str w "px")
+       :height   (str h "px")
+       :z-index  z})
+(defn card-pile [id g] (first (for [[p cs] g :when (not (empty? (filter #(= id %) cs)))] [p cs])))
+(defn card-coords [id g]
+      (let [[cp cs] (card-pile id g)
+            ix (if (nil? cs) nil (.indexOf cs id))
+            [i j k pp] (get gridm cp)]
+           [i j ix]))
+(defn card-cap [id] (get-in @game [:deck id]))
+(defn card-col [id] (if (re-seq #"[♥♦]" (card-cap id)) "red" "black"))
+(defn red-card? [id] (if (re-seq #"[♥♦]" (card-cap id)) true false))
+(defn card-flipc [id g] (if (get (get g "o") id) "flip" "up"))
+;(defn card-class [id _] (clojure.string/join " " ["card" (card-flipc id g) (card-col id)]))
+(defn card-class [id _])
+(defn card-css [id g] (xyz-wh->css (ijk->xyz (card-coords id g)) (wh)))
+(defn card-draggable [id g] (str (not (get (get g "o") id))))
+
+(defn pfinished [g]
+      (reduce + (for [fi ["f0" "f1" "f2" "f3"]] (count (get g fi)) )))
+
+
+;; virtual game state is derived from initial shuffling and moves
+
+(defn pileq
+      "transform game state in virtual game state (add-up: new->old; del: old->new)
+       ms: series of moves
+       output: map of piles and the current cards"
+      [ms]
+      (let [rxs (into {} (apply concat
+                                (for [[m0 _ m2 m3] ms :when (not= "o" m2)]
+                                     (map-indexed (fn [i c] [c [m2 (+ i (* 100 m3))]]) m0)))) ;sort index
+
+            grxs (group-by second (map (fn [[a [b c]]] [a b c]) rxs)) ;group-by destroys sorting in cljs
+            srtxs (map (fn [[k v]] [k (vec (sort-by last v))]) grxs)
+            ps (into {} (for [[k v] srtxs] [k (->> v (map #(get % 0)) (into []))]))]
+           ps))
+
+(defc= g2
+       (pileq (get game :moves)))
+
+(defc= cntr (- (get game :count) 35))
+
+(defc= visibility
+       (let [mos (->> (get-in game [:moves]) (mapv (fn [[c s t]] (if (= "o" t) c nil))) (filter vector?) (flatten))
+             v (vec (repeat (count new_deck) true))]
+            (reduce #(update %1 %2 not) v mos
+                    )))
+;; layout ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn cardv [id]
+      (div :class (cell= {:card  true
+                          :red   (red-card? id)
+                          :black (not (red-card? id))
+                          :flip  (get visibility id)
+                          :up    (not (get visibility id))
+                          :selected (= (first (get selected 1)) id)})
+           :css (cell= (card-css id g2))
+           :click #(clicked! :card id)
+           :id (str id)
+           (div :class "caption1" (card-cap id))
+           (div :class "caption2" (card-cap id))))
+(defn pilev [pathp [i j k]]
+      (div :class "pile dropzone"
+           :id (str pathp)
+           :css (xyz-wh->css (ijk->xyz [i j k]) (wh))
+           :click #(clicked! :pile pathp)))
+
+;; page ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(html
+  (head
+    (html-meta :charset "utf-8")
+    (html-meta :http-equiv "X-UA-Compatible" :content "IE=edge,chrome=1")
+    ;  (link :rel "stylesheet" :href "base.css")
+    (title "Hoplon • Klondike")
+    (style css-reset)
+    (style css-solitare))
+  (body
+    (noscript (div :id "noscript" (p "JavaScript is required to view this page.")))
+    (section
+      (header
+        :id "header"
+        (h1 (span "Klondike example created with Hoplon: " )
+            (span (cell= (str "moves: " cntr) ))
+            (span (cell= (if (= (pfinished g2) 52) "  You won!!!" (str "  Your progress: " (js/Math.round (* 100 (/ (pfinished g2)52)))))))
+            )))
+    (section
+      (div
+        :id "table"
+        :css {:position "absolut"
+              :width    (str (+ 280 (* 140 @size)) "px")
+              :height   (str (+ 250 (* 90 @size)) "px")
+              :border   "4px"
+              :padding  "10px"
+              }
+        (div :css {:position "relative"}
+             ;(pile-layout :init)
+             (for [[p ijk] gridm] (pilev p ijk))
+             (for [c (range 52)] (cardv c)))
+        ))
+    (section
+      (footer :id "info"
+              (p "Made for " (a :href "http://github.com/hoplon/demos/" "Hoplon demos"))))))
